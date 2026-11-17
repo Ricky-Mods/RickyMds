@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#10162b">
+    <meta name="description" content="Discover apps, games and useful tools at RICKY MODs. Explore applications and download with ease.">
+    <title>RICKY MODs | Apps, Games & More</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+    <script src="/app.js" defer></script>
+</head>
+
+<body>
+
+<header class="topbar">
+    <div class="nav-container">
+        <a class="brand" href="/">
+            <span class="brand-mark">R</span>
+            <span>RICKY <strong>MODs</strong></span>
+        </a>
+
+        <nav class="nav-links">
+            <a href="#home">Home</a>
+            <a href="#apps">Explore</a>
+            <a href="#about">About</a>
+            <a href="#contact">Contact</a>
+        </nav>
+
+        <a class="admin-link" href="/admin">Admin Portal <span>↗</span></a>
+    </div>
+</header>
+
+<main>
+
+<section class="hero" id="home">
+    <div class="hero-glow glow-one"></div>
+    <div class="hero-glow glow-two"></div>
+
+    <div class="hero-container">
+        <div class="hero-copy">
+            <div class="eyebrow">
+                <span class="live-dot"></span>
+                YOUR DIGITAL DOWNLOAD DESTINATION
+            </div>
+
+            <h1>
+                Discover more.<br>
+                <span>Download smarter.</span>
+            </h1>
+
+            <p>
+                Explore a growing collection of apps, games and useful tools.
+                Find what you need, discover something new and get started.
+            </p>
+
+            <div class="hero-actions">
+                <a class="button primary" href="#apps">
+                    Explore Applications <span>→</span>
+                </a>
+                <a class="button secondary" href="#about">
+                    Discover RICKY MODs
+                </a>
+            </div>
+
+            <div class="hero-points">
+                <span>✓ Easy discovery</span>
+                <span>✓ App information</span>
+                <span>✓ Simple downloads</span>
+            </div>
+        </div>
+
+        <div class="hero-art">
+            <div class="art-circle circle-one"></div>
+            <div class="art-circle circle-two"></div>
+
+            <div class="showcase-card showcase-back">
+                <div class="mini-icon purple">✦</div>
+                <div class="showcase-lines">
+                    <span></span><span></span>
+                </div>
+            </div>
+
+            <div class="showcase-card showcase-front">
+                <div class="showcase-header">
+                    <span class="mini-brand">R</span>
+                    <span>RICKY MODs</span>
+                    <span class="online-dot"></span>
+                </div>
+
+                <div class="showcase-title">Explore your next favourite</div>
+
+                <div class="showcase-apps">
+                    <div class="showcase-app app-purple">✦</div>
+                    <div class="showcase-app app-blue">◈</div>
+                    <div class="showcase-app app-orange">♫</div>
+                    <div class="showcase-app app-green">⚡</div>
+                </div>
+
+                <div class="showcase-lines">
+                    <span></span><span></span>
+                </div>
+
+                <div class="showcase-download">
+                    <span>Discover applications</span>
+                    <strong>→</strong>
+                </div>
+            </div>
+
+            <div class="floating-label">
+                <span class="floating-icon">✦</span>
+                <span><strong>Explore freely</strong><small>Apps and games</small></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="hero-bottom">
+        <span>DISCOVER</span>
+        <span class="hero-bottom-line"></span>
+        <span>EXPLORE</span>
+        <span class="hero-bottom-line"></span>
+        <span>DOWNLOAD</span>
+    </div>
+</section>
+
+<section class="benefits">
+    <div class="benefit">
+        <span class="benefit-icon">⌕</span>
+        <div><strong>Easy discovery</strong><small>Find applications with ease</small></div>
+    </div>
+    <div class="benefit">
+        <span class="benefit-icon">▣</span>
+        <div><strong>Useful information</strong><small>Explore app details and features</small></div>
+    </div>
+    <div class="benefit">
+        <span class="benefit-icon">↓</span>
+        <div><strong>Simple downloads</strong><small>Get your selected applications</small></div>
+    </div>
+</section>
+
+<section class="featured-section" id="featured-section" hidden>
+    <div class="featured-container">
+        <div class="section-head">
+            <div>
+                <span class="section-kicker">HAND-PICKED FOR YOU</span>
+                <h2>Featured applications<span>.</span></h2>
+                <p>Discover selected apps, games and tools from RICKY MODs.</p>
+            </div>
+            <span class="featured-label">★ FEATURED</span>
+        </div>
+        <div class="app-grid featured-grid" id="featured-grid"></div>
+    </div>
+</section>
+
+<section class="catalog" id="apps">
+    <div class="catalog-container">
+
+        <div class="section-head">
+            <div>
+                <span class="section-kicker">THE COLLECTION</span>
+                <h2>Explore applications<span>.</span></h2>
+                <p>Find apps, games and tools worth discovering.</p>
+            </div>
+
+            <div class="catalog-count">
+                <span class="count-dot"></span>
+                <span id="result-count">Loading applications...</span>
+            </div>
+        </div>
+
+        <div class="catalog-toolbar">
+            <label class="search">
+                <span class="search-icon">⌕</span>
+                <input
+                    type="search"
+                    id="search"
+                    placeholder="Search apps, games and tools..."
+                    autocomplete="off"
+                    aria-label="Search applications"
+                >
+                <span class="search-shortcut">SEARCH</span>
+            </label>
+        </div>
+
+        <div class="category-heading">
+            <span>Browse categories</span>
+            <span class="category-note">Choose what interests you</span>
+        </div>
+
+        <div class="chips" id="categories">
+            <button class="chip active" data-category="All" aria-pressed="true">All applications</button>
+            <button class="chip" data-category="Apps" aria-pressed="false">Apps</button>
+            <button class="chip" data-category="Games" aria-pressed="false">Games</button>
+            <button class="chip" data-category="Tools" aria-pressed="false">Tools</button>
+        </div>
+
+        <div id="app-grid" class="app-grid">
+            <div class="empty">Loading applications...</div>
+        </div>
+    </div>
+</section>
+
+<section class="about" id="about">
+    <div class="about-container">
+        <div class="about-visual">
+            <div class="about-orbit orbit-a"></div>
+            <div class="about-orbit orbit-b"></div>
+            <div class="about-logo">R<span>✦</span></div>
+            <div class="about-caption">DISCOVER SOMETHING NEW</div>
+        </div>
+
+        <div class="about-copy">
+            <span class="section-kicker">ABOUT OUR PLATFORM</span>
+            <h2>Welcome to <span>RICKY MODs.</span></h2>
+            <p>
+                RICKY MODs is a digital platform for discovering applications,
+                games and useful tools in one convenient place.
+            </p>
+            <p>
+                Our goal is to make exploring applications straightforward.
+                Browse the collection, read available information and find
+                downloads that interest you.
+            </p>
+
+            <a class="button dark-button" href="#apps">Explore the collection <span>→</span></a>
+        </div>
+    </div>
+</section>
+
+<section class="contact-section" id="contact">
+    <div class="contact-container">
+        <div>
+            <span class="section-kicker">STAY CONNECTED</span>
+            <h2>Have a question?</h2>
+            <p>Get in touch with RICKY MODs for enquiries and support.</p>
+        </div>
+
+        <a class="contact-button" href="https://wa.me/256793510510" target="_blank" rel="noopener noreferrer">
+            <span class="whatsapp-icon">✆</span>
+            Contact us on WhatsApp
+            <span>↗</span>
+        </a>
+    </div>
+</section>
+
+</main>
+
+<footer class="footer">
+    <div class="footer-main">
+        <div class="footer-brand">
+            <a class="brand" href="/">
+                <span class="brand-mark">R</span>
+                <span>RICKY <strong>MODs</strong></span>
+            </a>
+            <p>Your destination for discovering apps, games and useful tools.</p>
+        </div>
+
+        <div class="footer-links">
+            <div>
+                <h4>Explore</h4>
+                <a href="#home">Home</a>
+                <a href="#apps">Applications</a>
+                <a href="#about">About us</a>
+            </div>
+            <div>
+                <h4>Connect</h4>
+                <a href="https://wa.me/256793510510" target="_blank" rel="noopener noreferrer">WhatsApp</a>
+                <a href="#contact">Contact</a>
+                <a href="/admin">Admin portal</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer-bottom">
+        <span>© <span id="year"></span> RICKY MODs. All rights reserved.</span>
+        <span>DISCOVER · EXPLORE · DOWNLOAD</span>
+    </div>
+</footer>
+
+<div class="modal hidden" id="detail-modal">
+    <div class="modal-card">
+        <button class="close" id="close-modal" aria-label="Close details">×</button>
+        <div id="detail-content"></div>
+    </div>
+</div>
+
+</body>
+</html>

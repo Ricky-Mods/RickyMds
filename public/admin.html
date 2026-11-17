@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>RICKY MODs | Admin Dashboard</title>
+
+    <link rel="stylesheet" href="admin.css">
+
+</head>
+
+<body>
+
+<header>
+
+    <a href="/" class="brand">
+        RICKY <b>MODs</b>
+        <span>/ ADMIN</span>
+    </a>
+
+    <a href="/">
+        ← View Website
+    </a>
+
+</header>
+
+
+<main>
+
+    <!-- ADMIN LOGIN -->
+    <section id="login-panel" class="panel login">
+
+        <span class="eyebrow">
+            PRIVATE AREA
+        </span>
+
+        <h1>Admin Sign In</h1>
+
+        <p>
+            Manage your applications and games.
+        </p>
+
+
+        <form id="login-form">
+
+            <label>
+                Username
+
+                <input
+                    name="username"
+                    value="admin"
+                    required
+                    autocomplete="username"
+                >
+            </label>
+
+
+            <label>
+                Password
+
+                <input
+                    name="password"
+                    type="password"
+                    required
+                    autocomplete="current-password"
+                >
+            </label>
+
+
+            <button class="primary">
+                Sign In Securely
+            </button>
+
+            <div class="message"
+                 id="login-message">
+            </div>
+
+        </form>
+
+    </section>
+
+
+    <!-- ADMIN DASHBOARD -->
+    <section id="dashboard" class="hidden">
+
+
+        <div class="dash-head">
+
+            <div>
+
+                <span class="eyebrow">
+                    CONTROL CENTRE
+                </span>
+
+                <h1>Website Dashboard</h1>
+
+                <p>
+                    Publish, update and manage your downloads.
+                </p>
+
+            </div>
+
+            <button id="logout" class="ghost">
+                Sign Out
+            </button>
+
+        </div>
+
+
+        <!-- STATISTICS -->
+        <div class="stats">
+
+            <div class="stat">
+                <small>Total Listings</small>
+                <b id="stat-total">0</b>
+            </div>
+
+            <div class="stat">
+                <small>Published</small>
+                <b id="stat-published">0</b>
+            </div>
+
+            <div class="stat">
+                <small>Total Downloads</small>
+                <b id="stat-downloads">0</b>
+            </div>
+
+        </div>
+
+
+        <div class="columns">
+
+
+            <!-- UPLOAD FORM -->
+            <section class="panel">
+
+                <div class="panel-head">
+
+                    <h2 id="form-title">
+                        Add a New Listing
+                    </h2>
+
+                    <button id="reset-form"
+                            class="text-btn">
+                        Clear Form
+                    </button>
+
+                </div>
+
+
+                <form id="app-form"
+                      enctype="multipart/form-data">
+
+                    <input type="hidden" name="id">
+
+
+                    <label>
+                        App or Game Name
+
+                        <input
+                            name="title"
+                            required
+                            maxlength="120"
+                            placeholder="Example Game"
+                        >
+                    </label>
+
+
+                    <div class="two">
+
+                        <label>
+                            Category
+
+                            <select name="category">
+
+                                <option>Apps</option>
+                                <option>Games</option>
+                                <option>Tools</option>
+
+                            </select>
+                        </label>
+
+
+                        <label>
+                            Version
+
+                            <input
+                                name="version"
+                                placeholder="2.4.1"
+                            >
+                        </label>
+
+                    </div>
+
+
+                    <div class="two">
+
+                        <label>
+                            File Size
+
+                            <input
+                                name="size"
+                                placeholder="85 MB"
+                            >
+                        </label>
+
+
+                        <label>
+                            Package Name
+
+                            <input
+                                name="packageName"
+                                placeholder="com.example.app"
+                            >
+                        </label>
+
+                    </div>
+
+
+                    <label>
+                        Description
+
+                        <textarea
+                            name="description"
+                            required
+                            rows="4"
+                            placeholder="Describe the application..."
+                        ></textarea>
+                    </label>
+
+
+                    <label>
+                        Features
+
+                        <textarea
+                            name="features"
+                            rows="3"
+                            placeholder="List application features..."
+                        ></textarea>
+                    </label>
+
+
+                    <div class="two">
+
+                        <label>
+                            Application File
+
+                            <input
+                                type="file"
+                                name="apk"
+                                accept=".apk,.xapk,.apks,.zip"
+                            >
+                        </label>
+
+
+                        <label>
+                            Cover Image
+
+                            <input
+                                type="file"
+                                name="cover"
+                                accept="image/png,image/jpeg,image/webp,image/avif"
+                            >
+                        </label>
+
+                    </div>
+
+
+                    <div class="two">
+
+                        <label>
+                            Status
+
+                            <select name="status">
+
+                                <option value="published">
+                                    Published
+                                </option>
+
+                                <option value="draft">
+                                    Draft
+                                </option>
+
+                            </select>
+                        </label>
+
+
+                        <label class="check">
+
+                            <input
+                                type="checkbox"
+                                name="featured"
+                            >
+
+                            Feature This Listing
+
+                        </label>
+
+                    </div>
+
+
+                    <button class="primary"
+                            id="save-button">
+                        Publish Listing
+                    </button>
+
+
+                    <div class="message"
+                         id="form-message">
+                    </div>
+
+                </form>
+
+            </section>
+
+
+            <!-- LISTINGS MANAGEMENT -->
+            <section class="panel listings">
+
+                <div class="panel-head">
+
+                    <h2>Your Listings</h2>
+
+                    <button id="refresh"
+                            class="text-btn">
+                        Refresh ↻
+                    </button>
+
+                </div>
+
+
+                <div id="listing-list"
+                     class="listing-list">
+
+                    Loading...
+
+                </div>
+
+            </section>
+
+        </div>
+
+
+        <!-- PASSWORD MANAGEMENT -->
+        <section class="panel password-panel">
+
+            <h2>Change Admin Password</h2>
+
+            <form id="password-form"
+                  class="password-form">
+
+                <input
+                    type="password"
+                    name="currentPassword"
+                    placeholder="Current password"
+                    required
+                >
+
+                <input
+                    type="password"
+                    name="newPassword"
+                    placeholder="New password (12+ characters)"
+                    minlength="12"
+                    required
+                >
+
+                <button class="ghost">
+                    Update Password
+                </button>
+
+            </form>
+
+
+            <div class="message"
+                 id="password-message">
+            </div>
+
+        </section>
+
+    </section>
+
+</main>
+
+
+<script src="/admin.js" defer></script>
+
+</body>
+</html>

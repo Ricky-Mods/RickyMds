@@ -1,328 +1,1235 @@
-'use strict';
+require("dotenv").config();
 
-/*
- * RICKY MDs — backend server
- *
- * Run with:
- *   npm install express multer cors cookie-parser
- *   node server.js
- *
- * Then open:   http://localhost:3000
- * Admin login: admin / Ricky2024
- *
- * Contacts (defaults seeded into data/db.json on first run):
- *   Telegram:  https://t.me/RickyMods
- *   WhatsApp:  +256793510510  →  https://wa.me/256793510510
- */
+const express = require("express");
+const session = require("express-session");
+const SQLiteStore = require("connect-sqlite3")(session);
+const Database = require("better-sqlite3");
+const bcrypt = require("bcryptjs");
+const multer = require("multer");
+const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 
-const express = require('express');
-const multer = require('multer');
-const cookieParser = require('cookie-parser');
-const cors = require('cors');
-const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
-
-const ROOT = __dirname;
-const PUBLIC_DIR = path.join(ROOT, 'public');
-const UPLOAD_DIR = path.join(ROOT, 'uploads');
-const DATA_DIR = path.join(ROOT, 'data');
-const DB_FILE = path.join(DATA_DIR, 'db.json');
-
-for (const dir of [UPLOAD_DIR, DATA_DIR]) {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-}
-
-function hashPassword(password, salt) { return crypto.scryptSync(String(password), String(salt), 64).toString('hex'); }
-function uid() { return crypto.randomBytes(9).toString('hex'); }
-
-const CONTACT_DEFAULTS = {
-  siteName: 'RICKY MDs',
-  tagline: 'Premium modded apps, safe and fast.',
-  announcement: 'Welcome to RICKY MDs. New modded apps land every day. Chat us on WhatsApp or join the Telegram channel for early drops and update alerts.',
-  contact: 'support@rickymds.app',
-  telegram: 'RickyMods',
-  whatsapp: '+256793510510'
-};
-
-const SAMPLE_APPS = [
-  { name: 'Spotify Premium', packageName: 'com.spotify.music', version: '8.9.44', category: 'Music', developer: 'Spotify AB', rating: 4.8, description: 'Stream millions of tracks and podcasts with the full premium experience unlocked.', whatsNew: 'Premium unlocked, ads removed, unlimited skips, extreme quality, offline downloads.', downloads: 184320, featured: true },
-  { name: 'WhatsApp Plus', packageName: 'com.whatsapp.plus', version: '17.30', category: 'Social', developer: 'RICKY MDs', rating: 4.7, description: 'A customised WhatsApp build with extra privacy controls, themes and media tools.', whatsNew: 'Anti delete, hide blue ticks, custom themes, status saver, freeze last seen.', downloads: 152880, featured: true },
-  { name: 'YouTube ReVanced', packageName: 'app.revanced.android.youtube', version: '19.16.39', category: 'Video', developer: 'ReVanced Team', rating: 4.9, description: 'The full YouTube experience with interruptions stripped out.', whatsNew: 'Zero ads, background play, sponsor block, speed controls, video downloads.', downloads: 231400, featured: true },
-  { name: 'CapCut Pro', packageName: 'com.lemon.lvoverseas', version: '11.4.0', category: 'Video', developer: 'Bytedance', rating: 4.6, description: 'Professional video editing on your phone with every premium template unlocked.', whatsNew: 'Pro unlocked, watermark removed, all effects, 4K export.', downloads: 98760, featured: false },
-  { name: 'Instagram Pro', packageName: 'com.instagram.android', version: '300.0.0.0', category: 'Social', developer: 'RICKY MDs', rating: 4.5, description: 'Browse Instagram without limits and save any photo, reel or story.', whatsNew: 'Media downloads, hide seen, hide typing, copy captions, no suggested posts.', downloads: 76420, featured: false },
-  { name: 'PUBG Mobile', packageName: 'com.tencent.ig', version: '3.2.0', category: 'Games', developer: 'Level Infinite', rating: 4.4, description: 'Battle royale action with a tuned build for smoother aiming.', whatsNew: 'Aim assist, no recoil, extended view, unlocked skins.', downloads: 64190, featured: false }
-];
-
-function defaultDb() {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const now = Date.now();
-  return {
-    settings: { ...CONTACT_DEFAULTS },
-    admin: { username: 'admin', salt, hash: hashPassword('Ricky2024', salt) },
-    apps: SAMPLE_APPS.map((item, index) => ({
-      id: uid(),
-      name: item.name, packageName: item.packageName, version: item.version,
-      category: item.category, developer: item.developer, rating: item.rating,
-      description: item.description, whatsNew: item.whatsNew,
-      iconUrl: '', apkUrl: '', apkName: '',
-      featured: item.featured, downloads: item.downloads,
-      createdAt: new Date(now - index * 86400000).toISOString()
-    })),
-    requests: []
-  };
-}
-
-let db;
-function loadDb() {
-  if (fs.existsSync(DB_FILE)) {
-    try { db = JSON.parse(fs.readFileSync(DB_FILE, 'utf8')); } catch { db = defaultDb(); }
-  } else { db = defaultDb(); }
-  if (!Array.isArray(db.apps)) db.apps = [];
-  if (!Array.isArray(db.requests)) db.requests = [];
-  if (!db.admin) db.admin = defaultDb().admin;
-  if (!db.settings) db.settings = { ...CONTACT_DEFAULTS };
-  else for (const k of Object.keys(CONTACT_DEFAULTS)) if (db.settings[k] === undefined || db.settings[k] === '') db.settings[k] = CONTACT_DEFAULTS[k];
-  saveDb();
-}
-function saveDb() { fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2)); }
-loadDb();
-
-const sessions = new Map();
-const SESSION_TTL = 1000 * 60 * 60 * 8;
-const COOKIE_NAME = 'rickymds_session';
-
-function createSession(username) { const token = crypto.randomBytes(24).toString('hex'); sessions.set(token, { username, expires: Date.now() + SESSION_TTL }); return token; }
-function readSession(req) {
-  const token = req.cookies[COOKIE_NAME];
-  if (!token) return null;
-  const s = sessions.get(token);
-  if (!s) return null;
-  if (s.expires < Date.now()) { sessions.delete(token); return null; }
-  s.expires = Date.now() + SESSION_TTL;
-  return s;
-}
-function requireAdmin(req, res, next) { if (!readSession(req)) return res.status(401).json({ error: 'Admin sign in required' }); next(); }
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
-  filename: (req, file, cb) => {
-    const ext = path.extname(file.originalname || '').toLowerCase();
-    const base = path.basename(file.originalname || 'file', ext).replace(/[^a-zA-Z0-9]/g, '').slice(0, 28) || 'file';
-    cb(null, base + '_' + Date.now() + '_' + uid().slice(0, 6) + ext);
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 250 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (file.fieldname === 'icon' && !/^image\//i.test(file.mimetype)) return cb(new Error('The icon must be an image file'));
-    if (file.fieldname === 'apk' && !/\.(apk|xapk|apks|zip)$/i.test(file.originalname || '')) return cb(new Error('The package must be an apk, xapk, apks or zip file'));
-    cb(null, true);
-  }
-});
+const path = require("path");
+const fs = require("fs");
+const crypto = require("crypto");
 
 const app = express();
 
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()).filter(Boolean) : null;
-app.use(cors({
-  origin: function (origin, cb) {
-    if (!origin) return cb(null, true);
-    if (!ALLOWED_ORIGINS) return cb(null, true);
-    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-    return cb(new Error('Origin not allowed'));
-  },
-  credentials: true
-}));
+const PORT = Number(process.env.PORT || 3000);
+const ROOT = __dirname;
+const DATA = path.join(ROOT, "data");
+const UPLOADS = path.join(ROOT, "uploads");
 
-app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ extended: true }));
-app.use(cookieParser());
 
-/* API routes first */
-app.get('/health', (req, res) => res.json({ ok: true, uptime: process.uptime() }));
-app.get('/api/settings', (req, res) => res.json(db.settings));
-app.get('/api/apps', (req, res) => res.json(db.apps.slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))));
-app.get('/api/apps/:id', (req, res) => { const item = db.apps.find(e => e.id === req.params.id); if (!item) return res.status(404).json({ error: 'App not found' }); res.json(item); });
+// CREATE REQUIRED FOLDERS
 
-app.get('/api/download/:id', (req, res) => {
-  const item = db.apps.find(e => e.id === req.params.id);
-  if (!item) return res.status(404).json({ error: 'App not found' });
-  if (!item.apkUrl) return res.status(404).json({ error: 'The APK file is not uploaded yet' });
-  item.downloads = (Number(item.downloads) || 0) + 1;
-  saveDb();
-  if (item.apkUrl.startsWith('/uploads/')) {
-    const filePath = path.join(UPLOAD_DIR, path.basename(item.apkUrl));
-    if (fs.existsSync(filePath)) return res.download(filePath, item.apkName || path.basename(filePath));
-  }
-  return res.redirect(item.apkUrl);
-});
-
-app.post('/api/requests', (req, res) => {
-  const body = req.body || {};
-  const name = String(body.name || '').trim();
-  const contact = String(body.contact || '').trim();
-  const appName = String(body.appName || '').trim();
-  if (!name || !contact || !appName) return res.status(400).json({ error: 'Name, contact and app name are required' });
-  const request = { id: uid(), name: name.slice(0, 80), contact: contact.slice(0, 140), appName: appName.slice(0, 140), note: String(body.note || '').slice(0, 800), status: 'open', createdAt: new Date().toISOString() };
-  db.requests.unshift(request);
-  saveDb();
-  res.json({ ok: true, request });
-});
-
-app.post('/api/login', (req, res) => {
-  const body = req.body || {};
-  const username = String(body.username || '');
-  const password = String(body.password || '');
-  if (!username || !password) return res.status(400).json({ error: 'Username and password are required' });
-  const rec = db.admin;
-  const incoming = Buffer.from(hashPassword(password, rec.salt), 'hex');
-  const stored = Buffer.from(rec.hash, 'hex');
-  const ok = username === rec.username && incoming.length === stored.length && crypto.timingSafeEqual(incoming, stored);
-  if (!ok) return res.status(401).json({ error: 'Wrong username or password' });
-  const token = createSession(rec.username);
-  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
-  res.cookie(COOKIE_NAME, token, { httpOnly: true, sameSite: isHttps ? 'none' : 'lax', secure: isHttps, maxAge: SESSION_TTL, path: '/' });
-  res.json({ ok: true, username: rec.username });
-});
-
-app.post('/api/logout', (req, res) => {
-  const token = req.cookies[COOKIE_NAME];
-  if (token) sessions.delete(token);
-  res.clearCookie(COOKIE_NAME);
-  res.json({ ok: true });
-});
-
-app.get('/api/admin/session', (req, res) => {
-  const s = readSession(req);
-  res.json({ authenticated: Boolean(s), username: s ? s.username : '' });
-});
-
-app.get('/api/admin/apps', requireAdmin, (req, res) => res.json(db.apps.slice().sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0))));
-
-function buildAppFromBody(body, files, existing) {
-  const iconFile = files.icon && files.icon[0];
-  const apkFile = files.apk && files.apk[0];
-  const rating = Number(body.rating);
-  const record = {
-    name: String(body.name || '').slice(0, 120),
-    packageName: String(body.packageName || '').slice(0, 120),
-    version: String(body.version || '1.0').slice(0, 40),
-    category: String(body.category || 'Tools').slice(0, 40),
-    developer: String(body.developer || 'RICKY MDs').slice(0, 80),
-    rating: Number.isFinite(rating) ? Math.max(0, Math.min(5, rating)) : 4.5,
-    description: String(body.description || '').slice(0, 3000),
-    whatsNew: String(body.whatsNew || '').slice(0, 3000),
-    iconUrl: iconFile ? '/uploads/' + iconFile.filename : String(body.iconUrl || '').slice(0, 600),
-    featured: body.featured === 'true' || body.featured === 'on' || body.featured === true
-  };
-  if (apkFile) { record.apkUrl = '/uploads/' + apkFile.filename; record.apkName = String(apkFile.originalname || '').slice(0, 200); }
-  else if (existing) { record.apkUrl = existing.apkUrl || ''; record.apkName = existing.apkName || ''; }
-  else { record.apkUrl = ''; record.apkName = ''; }
-  if (!record.iconUrl && existing) record.iconUrl = existing.iconUrl || '';
-  return record;
+for (const dir of [
+    DATA,
+    path.join(UPLOADS, "apps"),
+    path.join(UPLOADS, "covers")
+]) {
+    fs.mkdirSync(dir, { recursive: true });
 }
 
-const appUpload = upload.fields([{ name: 'apk', maxCount: 1 }, { name: 'icon', maxCount: 1 }]);
 
-app.post('/api/admin/apps', requireAdmin, appUpload, (req, res) => {
-  const body = req.body || {};
-  if (!String(body.name || '').trim()) return res.status(400).json({ error: 'App name is required' });
-  const record = buildAppFromBody(body, req.files || {}, null);
-  record.id = uid();
-  record.downloads = 0;
-  record.createdAt = new Date().toISOString();
-  db.apps.unshift(record);
-  saveDb();
-  res.json(record);
+// ENVIRONMENT SECURITY
+
+if (!process.env.SESSION_SECRET ||
+    !process.env.ADMIN_PASSWORD) {
+
+    console.error(
+        "Missing SESSION_SECRET or ADMIN_PASSWORD. Configure your .env file."
+    );
+
+    process.exit(1);
+}
+
+
+// DATABASE CONNECTION
+
+const db = new Database(
+    path.join(DATA, "ricky-mods.db")
+);
+
+db.pragma("journal_mode = WAL");
+
+
+// DATABASE TABLES
+
+db.exec(`
+
+CREATE TABLE IF NOT EXISTS apps (
+
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+    title TEXT NOT NULL,
+
+    slug TEXT NOT NULL UNIQUE,
+
+    category TEXT NOT NULL,
+
+    version TEXT DEFAULT '',
+
+    size TEXT DEFAULT '',
+
+    description TEXT NOT NULL,
+
+    features TEXT DEFAULT '',
+
+    package_name TEXT DEFAULT '',
+
+    file_name TEXT NOT NULL,
+
+    cover_name TEXT DEFAULT '',
+
+    downloads INTEGER NOT NULL DEFAULT 0,
+
+    featured INTEGER NOT NULL DEFAULT 0,
+
+    status TEXT NOT NULL DEFAULT 'published',
+
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+
+);
+
+
+CREATE TABLE IF NOT EXISTS settings (
+
+    key TEXT PRIMARY KEY,
+
+    value TEXT NOT NULL
+
+);
+
+`);
+
+
+// INITIAL ADMIN PASSWORD
+
+const adminHash = bcrypt.hashSync(
+    process.env.ADMIN_PASSWORD,
+    12
+);
+
+const setting = db.prepare(
+    "SELECT value FROM settings WHERE key='admin_hash'"
+).get();
+
+if (!setting) {
+
+    db.prepare(
+        "INSERT INTO settings(key,value) VALUES('admin_hash',?)"
+    ).run(adminHash);
+
+}
+
+
+// MIDDLEWARE
+
+app.disable("x-powered-by");
+
+app.use(
+    helmet({
+        contentSecurityPolicy: false
+    })
+);
+
+app.use(
+    express.json({
+        limit: "1mb"
+    })
+);
+
+app.use(
+    express.urlencoded({
+        extended: true
+    })
+);
+
+
+// SESSION MANAGEMENT
+
+app.use(
+    session({
+
+        store: new SQLiteStore({
+            db: "sessions.db",
+            dir: DATA
+        }),
+
+        secret: process.env.SESSION_SECRET,
+
+        resave: false,
+
+        saveUninitialized: false,
+
+        cookie: {
+
+            httpOnly: true,
+
+            sameSite: "lax",
+
+            secure: process.env.NODE_ENV === "production",
+
+            maxAge: 8 * 60 * 60 * 1000
+
+        }
+
+    })
+);
+
+
+// LOGIN RATE LIMIT
+
+app.use(
+    "/api/login",
+    rateLimit({
+
+        windowMs: 15 * 60 * 1000,
+
+        limit: 10,
+
+        standardHeaders: true,
+
+        legacyHeaders: false
+
+    })
+);
+
+
+// SERVE FRONTEND
+
+app.use(
+    express.static(
+        path.join(ROOT, "public")
+    )
+);
+
+app.get("/admin", (req, res) => {
+
+    res.sendFile(
+        path.join(ROOT, "public", "admin.html")
+    );
+
 });
 
-app.put('/api/admin/apps/:id', requireAdmin, appUpload, (req, res) => {
-  const existing = db.apps.find(e => e.id === req.params.id);
-  if (!existing) return res.status(404).json({ error: 'App not found' });
-  const body = req.body || {};
-  if (!String(body.name || '').trim()) return res.status(400).json({ error: 'App name is required' });
-  Object.assign(existing, buildAppFromBody(body, req.files || {}, existing));
-  saveDb();
-  res.json(existing);
+
+// SERVE COVER IMAGES
+
+app.use(
+    "/uploads/covers",
+    express.static(
+        path.join(UPLOADS, "covers")
+    )
+);
+
+
+// HELPER FUNCTIONS
+
+const clean = (value, max = 10000) => {
+
+    return String(value ?? "")
+        .trim()
+        .slice(0, max);
+
+};
+
+
+const slugify = (value) => {
+
+    return clean(value, 100)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "")
+        || crypto.randomUUID();
+
+};
+
+
+// FORMAT DATABASE APP FOR PUBLIC WEBSITE
+
+const publicApp = (row) => ({
+
+    id: row.id,
+
+    title: row.title,
+
+    slug: row.slug,
+
+    category: row.category,
+
+    version: row.version,
+
+    size: row.size,
+
+    description: row.description,
+
+    features: row.features,
+
+    packageName: row.package_name,
+
+    cover: row.cover_name
+        ? `/uploads/covers/${encodeURIComponent(row.cover_name)}`
+        : "",
+
+    downloads: row.downloads,
+
+    featured: !!row.featured,
+
+    createdAt: row.created_at
+
 });
 
-app.delete('/api/admin/apps/:id', requireAdmin, (req, res) => {
-  const index = db.apps.findIndex(e => e.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: 'App not found' });
-  const [removed] = db.apps.splice(index, 1);
-  for (const url of [removed.apkUrl, removed.iconUrl]) {
-    if (url && url.startsWith('/uploads/')) fs.promises.unlink(path.join(UPLOAD_DIR, path.basename(url))).catch(() => {});
-  }
-  saveDb();
-  res.json({ ok: true });
+
+// ADMIN AUTHENTICATION MIDDLEWARE
+
+const isAdmin = (req, res, next) => {
+
+    if (req.session?.admin) {
+
+        return next();
+
+    }
+
+    return res.status(401).json({
+
+        error: "Please sign in as an administrator."
+
+    });
+
+};
+
+
+// FILE UPLOAD CONFIGURATION
+
+const storage = multer.diskStorage({
+
+    destination: (req, file, cb) => {
+
+        if (file.fieldname === "apk") {
+
+            cb(
+                null,
+                path.join(UPLOADS, "apps")
+            );
+
+        } else {
+
+            cb(
+                null,
+                path.join(UPLOADS, "covers")
+            );
+
+        }
+
+    },
+
+
+    filename: (req, file, cb) => {
+
+        const ext = path.extname(
+            file.originalname
+        ).toLowerCase();
+
+        cb(
+            null,
+            `${Date.now()}-${crypto.randomBytes(5).toString("hex")}${ext}`
+        );
+
+    }
+
 });
 
-app.get('/api/admin/requests', requireAdmin, (req, res) => res.json(db.requests));
-app.delete('/api/admin/requests/:id', requireAdmin, (req, res) => {
-  const index = db.requests.findIndex(e => e.id === req.params.id);
-  if (index === -1) return res.status(404).json({ error: 'Request not found' });
-  db.requests.splice(index, 1);
-  saveDb();
-  res.json({ ok: true });
+
+const upload = multer({
+
+    storage,
+
+    limits: {
+
+        fileSize:
+            Number(process.env.MAX_UPLOAD_MB || 500)
+            * 1024 * 1024,
+
+        files: 2
+
+    },
+
+
+    fileFilter: (req, file, cb) => {
+
+        const ext = path.extname(
+            file.originalname
+        ).toLowerCase();
+
+
+        const allowedApps = [
+            ".apk",
+            ".xapk",
+            ".apks",
+            ".zip"
+        ];
+
+
+        const allowedImages = [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/avif"
+        ];
+
+
+        const valid = file.fieldname === "apk"
+            ? allowedApps.includes(ext)
+            : file.fieldname === "cover"
+                && allowedImages.includes(file.mimetype);
+
+
+        if (valid) {
+
+            cb(null, true);
+
+        } else {
+
+            cb(
+                new Error("Unsupported file type.")
+            );
+
+        }
+
+    }
+
 });
 
-app.put('/api/admin/settings', requireAdmin, (req, res) => {
-  const body = req.body || {};
-  db.settings = {
-    siteName: String(body.siteName || db.settings.siteName).slice(0, 60),
-    tagline: String(body.tagline || '').slice(0, 160),
-    announcement: String(body.announcement || '').slice(0, 600),
-    contact: String(body.contact || '').slice(0, 160),
-    telegram: String(body.telegram || '').slice(0, 160),
-    whatsapp: String(body.whatsapp || '').slice(0, 40)
-  };
-  saveDb();
-  res.json(db.settings);
+
+// ======================================
+// PUBLIC WEBSITE API
+// ======================================
+
+
+// GET APPLICATIONS AND GAMES
+
+app.get("/api/apps", (req, res) => {
+
+    const q = clean(req.query.q, 100);
+
+    const category = clean(
+        req.query.category,
+        60
+    );
+
+    const where = [
+        "status='published'"
+    ];
+
+    const args = [];
+
+
+    if (q) {
+
+        where.push(
+            "(title LIKE ? OR description LIKE ? OR category LIKE ?)"
+        );
+
+        args.push(
+            `%${q}%`,
+            `%${q}%`,
+            `%${q}%`
+        );
+
+    }
+
+
+    if (category && category !== "All") {
+
+        where.push("category=?");
+
+        args.push(category);
+
+    }
+
+
+    const rows = db.prepare(`
+
+        SELECT * FROM apps
+
+        WHERE ${where.join(" AND ")}
+
+        ORDER BY featured DESC, created_at DESC
+
+    `).all(...args);
+
+
+    res.json(
+        rows.map(publicApp)
+    );
+
 });
 
-app.post('/api/admin/password', requireAdmin, (req, res) => {
-  const body = req.body || {};
-  const currentPassword = String(body.currentPassword || '');
-  const newPassword = String(body.newPassword || '');
-  if (newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters' });
-  const incoming = Buffer.from(hashPassword(currentPassword, db.admin.salt), 'hex');
-  const stored = Buffer.from(db.admin.hash, 'hex');
-  const ok = incoming.length === stored.length && crypto.timingSafeEqual(incoming, stored);
-  if (!ok) return res.status(401).json({ error: 'Current password is not correct' });
-  const salt = crypto.randomBytes(16).toString('hex');
-  db.admin.salt = salt;
-  db.admin.hash = hashPassword(newPassword, salt);
-  saveDb();
-  res.json({ ok: true });
+
+// GET SINGLE APP
+
+app.get("/api/apps/:slug", (req, res) => {
+
+    const row = db.prepare(`
+
+        SELECT * FROM apps
+
+        WHERE slug=?
+
+        AND status='published'
+
+    `).get(
+        clean(req.params.slug, 120)
+    );
+
+
+    if (!row) {
+
+        return res.status(404).json({
+
+            error: "App not found."
+
+        });
+
+    }
+
+
+    res.json(
+        publicApp(row)
+    );
+
 });
 
-app.use('/api', (req, res) => res.status(404).json({ error: 'Endpoint not found' }));
 
-/* Static frontend */
-app.use(express.static(PUBLIC_DIR, { extensions: ['html'] }));
-app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
+// DOWNLOAD APPLICATION
 
-/* Fallback */
-app.use((req, res) => {
-  if (req.method === 'GET' && !req.path.startsWith('/api')) {
-    return res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
-  }
-  res.status(404).type('text').send('Not found');
+app.get("/api/download/:id", (req, res) => {
+
+    const row = db.prepare(`
+
+        SELECT * FROM apps
+
+        WHERE id=?
+
+        AND status='published'
+
+    `).get(
+        Number(req.params.id)
+    );
+
+
+    if (!row) {
+
+        return res.status(404).send(
+            "Download not found."
+        );
+
+    }
+
+
+    const file = path.join(
+        UPLOADS,
+        "apps",
+        path.basename(row.file_name)
+    );
+
+
+    if (!fs.existsSync(file)) {
+
+        return res.status(404).send(
+            "The file is currently unavailable."
+        );
+
+    }
+
+
+    db.prepare(`
+
+        UPDATE apps
+
+        SET downloads = downloads + 1
+
+        WHERE id=?
+
+    `).run(row.id);
+
+
+    res.download(
+        file,
+        path.basename(row.file_name)
+    );
+
 });
 
-/* Error handler */
+
+// ======================================
+// ADMIN LOGIN
+// ======================================
+
+app.post("/api/login", async (req, res) => {
+
+    const username = clean(
+        req.body.username,
+        80
+    );
+
+    const password = String(
+        req.body.password || ""
+    );
+
+
+    const expected = clean(
+        process.env.ADMIN_USERNAME || "admin",
+        80
+    );
+
+
+    const hash = db.prepare(`
+
+        SELECT value FROM settings
+
+        WHERE key='admin_hash'
+
+    `).get()?.value;
+
+
+    if (
+        username !== expected ||
+        !await bcrypt.compare(password, hash || "")
+    ) {
+
+        return res.status(401).json({
+
+            error: "Incorrect username or password."
+
+        });
+
+    }
+
+
+    req.session.regenerate(err => {
+
+        if (err) {
+
+            return res.status(500).json({
+
+                error: "Could not create a secure session."
+
+            });
+
+        }
+
+
+        req.session.admin = true;
+
+        res.json({
+
+            ok: true
+
+        });
+
+    });
+
+});
+
+
+// ADMIN LOGOUT
+
+app.post("/api/logout", isAdmin, (req, res) => {
+
+    req.session.destroy(() => {
+
+        res.json({
+
+            ok: true
+
+        });
+
+    });
+
+});
+
+
+// CHECK ADMIN SESSION
+
+app.get("/api/admin/me", isAdmin, (req, res) => {
+
+    res.json({
+
+        ok: true
+
+    });
+
+});
+
+
+// ======================================
+// ADMIN APPLICATION MANAGEMENT
+// ======================================
+
+
+// GET ALL LISTINGS
+
+app.get("/api/admin/apps", isAdmin, (req, res) => {
+
+    const rows = db.prepare(`
+
+        SELECT * FROM apps
+
+        ORDER BY created_at DESC
+
+    `).all();
+
+
+    res.json(
+
+        rows.map(row => ({
+
+            ...publicApp(row),
+
+            status: row.status,
+
+            fileName: row.file_name,
+
+            coverName: row.cover_name
+
+        }))
+
+    );
+
+});
+
+
+// UPLOAD NEW APPLICATION
+
+app.post(
+    "/api/admin/apps",
+    isAdmin,
+    upload.fields([
+        { name: "apk", maxCount: 1 },
+        { name: "cover", maxCount: 1 }
+    ]),
+    (req, res) => {
+
+        const title = clean(
+            req.body.title,
+            120
+        );
+
+        const description = clean(
+            req.body.description,
+            12000
+        );
+
+
+        const apk = req.files?.apk?.[0];
+
+
+        if (!title || !description || !apk) {
+
+            if (apk) {
+
+                fs.unlinkSync(apk.path);
+
+            }
+
+            return res.status(400).json({
+
+                error: "Title, description and an app file are required."
+
+            });
+
+        }
+
+
+        const slug =
+            slugify(title)
+            + "-"
+            + crypto.randomBytes(2).toString("hex");
+
+
+        const cover =
+            req.files?.cover?.[0]?.filename || "";
+
+
+        const info = {
+
+            title,
+
+            slug,
+
+            category: clean(
+                req.body.category,
+                60
+            ) || "Apps",
+
+            version: clean(
+                req.body.version,
+                40
+            ),
+
+            size: clean(
+                req.body.size,
+                40
+            ),
+
+            description,
+
+            features: clean(
+                req.body.features,
+                4000
+            ),
+
+            package_name: clean(
+                req.body.packageName,
+                160
+            ),
+
+            file_name: apk.filename,
+
+            cover_name: cover,
+
+            featured:
+                req.body.featured === "true" ? 1 : 0,
+
+            status:
+                req.body.status === "draft"
+                    ? "draft"
+                    : "published"
+
+        };
+
+
+        const result = db.prepare(`
+
+            INSERT INTO apps(
+
+                title,
+                slug,
+                category,
+                version,
+                size,
+                description,
+                features,
+                package_name,
+                file_name,
+                cover_name,
+                featured,
+                status
+
+            )
+
+            VALUES(
+
+                @title,
+                @slug,
+                @category,
+                @version,
+                @size,
+                @description,
+                @features,
+                @package_name,
+                @file_name,
+                @cover_name,
+                @featured,
+                @status
+
+            )
+
+        `).run(info);
+
+
+        res.status(201).json({
+
+            id: result.lastInsertRowid
+
+        });
+
+    }
+);
+
+
+// EDIT EXISTING APPLICATION
+
+app.put(
+    "/api/admin/apps/:id",
+    isAdmin,
+    upload.fields([
+        { name: "apk", maxCount: 1 },
+        { name: "cover", maxCount: 1 }
+    ]),
+    (req, res) => {
+
+        const old = db.prepare(`
+
+            SELECT * FROM apps
+
+            WHERE id=?
+
+        `).get(
+            Number(req.params.id)
+        );
+
+
+        if (!old) {
+
+            return res.status(404).json({
+
+                error: "App not found."
+
+            });
+
+        }
+
+
+        const apk = req.files?.apk?.[0];
+
+        const cover = req.files?.cover?.[0];
+
+
+        const data = {
+
+            id: old.id,
+
+            title: clean(
+                req.body.title,
+                120
+            ) || old.title,
+
+            category: clean(
+                req.body.category,
+                60
+            ) || old.category,
+
+            version: clean(
+                req.body.version,
+                40
+            ),
+
+            size: clean(
+                req.body.size,
+                40
+            ),
+
+            description: clean(
+                req.body.description,
+                12000
+            ) || old.description,
+
+            features: clean(
+                req.body.features,
+                4000
+            ),
+
+            package_name: clean(
+                req.body.packageName,
+                160
+            ),
+
+            file_name: apk?.filename || old.file_name,
+
+            cover_name: cover?.filename || old.cover_name,
+
+            featured:
+                req.body.featured === "true" ? 1 : 0,
+
+            status:
+                req.body.status === "draft"
+                    ? "draft"
+                    : "published"
+
+        };
+
+
+        db.prepare(`
+
+            UPDATE apps SET
+
+                title=@title,
+                category=@category,
+                version=@version,
+                size=@size,
+                description=@description,
+                features=@features,
+                package_name=@package_name,
+                file_name=@file_name,
+                cover_name=@cover_name,
+                featured=@featured,
+                status=@status
+
+            WHERE id=@id
+
+        `).run(data);
+
+
+        if (apk) {
+
+            fs.unlink(
+                path.join(UPLOADS, "apps", old.file_name),
+                () => {}
+            );
+
+        }
+
+
+        if (cover && old.cover_name) {
+
+            fs.unlink(
+                path.join(UPLOADS, "covers", old.cover_name),
+                () => {}
+            );
+
+        }
+
+
+        res.json({
+
+            ok: true
+
+        });
+
+    }
+);
+
+
+// DELETE APPLICATION
+
+app.delete(
+    "/api/admin/apps/:id",
+    isAdmin,
+    (req, res) => {
+
+        const row = db.prepare(`
+
+            SELECT * FROM apps
+
+            WHERE id=?
+
+        `).get(
+            Number(req.params.id)
+        );
+
+
+        if (!row) {
+
+            return res.status(404).json({
+
+                error: "App not found."
+
+            });
+
+        }
+
+
+        db.prepare(`
+
+            DELETE FROM apps
+
+            WHERE id=?
+
+        `).run(row.id);
+
+
+        const files = [
+
+            [
+                path.join(UPLOADS, "apps"),
+                row.file_name
+            ],
+
+            [
+                path.join(UPLOADS, "covers"),
+                row.cover_name
+            ]
+
+        ];
+
+
+        for (const [dir, name] of files) {
+
+            if (name) {
+
+                fs.unlink(
+                    path.join(dir, path.basename(name)),
+                    () => {}
+                );
+
+            }
+
+        }
+
+
+        res.json({
+
+            ok: true
+
+        });
+
+    }
+);
+
+
+// ======================================
+// ADMIN STATISTICS
+// ======================================
+
+app.get(
+    "/api/admin/stats",
+    isAdmin,
+    (req, res) => {
+
+        const total = db.prepare(`
+
+            SELECT COUNT(*) n
+
+            FROM apps
+
+        `).get().n;
+
+
+        const published = db.prepare(`
+
+            SELECT COUNT(*) n
+
+            FROM apps
+
+            WHERE status='published'
+
+        `).get().n;
+
+
+        const downloads = db.prepare(`
+
+            SELECT COALESCE(SUM(downloads),0) n
+
+            FROM apps
+
+        `).get().n;
+
+
+        res.json({
+
+            total,
+
+            published,
+
+            downloads
+
+        });
+
+    }
+);
+
+
+// ======================================
+// CHANGE ADMIN PASSWORD
+// ======================================
+
+app.post(
+    "/api/admin/change-password",
+    isAdmin,
+    async (req, res) => {
+
+        const current = String(
+            req.body.currentPassword || ""
+        );
+
+        const next = String(
+            req.body.newPassword || ""
+        );
+
+
+        const hash = db.prepare(`
+
+            SELECT value FROM settings
+
+            WHERE key='admin_hash'
+
+        `).get()?.value;
+
+
+        if (!await bcrypt.compare(current, hash || "")) {
+
+            return res.status(400).json({
+
+                error: "Current password is incorrect."
+
+            });
+
+        }
+
+
+        if (next.length < 12) {
+
+            return res.status(400).json({
+
+                error: "Use at least 12 characters for the new password."
+
+            });
+
+        }
+
+
+        db.prepare(`
+
+            UPDATE settings
+
+            SET value=?
+
+            WHERE key='admin_hash'
+
+        `).run(
+            await bcrypt.hash(next, 12)
+        );
+
+
+        res.json({
+
+            ok: true
+
+        });
+
+    }
+);
+
+
+// ======================================
+// ERROR HANDLING
+// ======================================
+
 app.use((err, req, res, next) => {
-  if (res.headersSent) return next(err);
-  if (err instanceof multer.MulterError) return res.status(400).json({ error: 'Upload failed: ' + err.message });
-  return res.status(400).json({ error: err.message || 'Something went wrong' });
+
+    console.error(err.message);
+
+    res.status(
+        err instanceof multer.MulterError ? 400 : 500
+    ).json({
+
+        error: err.message || "Server error."
+
+    });
+
 });
 
-const PORT = process.env.PORT || 3000;
+
+// MAIN WEBSITE ROUTE
+
+app.get("*", (req, res) => {
+
+    res.sendFile(
+        path.join(ROOT, "public", "index.html")
+    );
+
+});
+
+
+// START SERVER
+
 app.listen(PORT, () => {
-  console.log('RICKY MDs running at http://localhost:' + PORT);
-  console.log('Telegram: https://t.me/RickyMods');
-  console.log('WhatsApp: https://wa.me/256793510510');
-  console.log('Admin login starts as admin with password Ricky2024');
+
+    console.log(
+        `RICKY MODs running at http://localhost:${PORT}`
+    );
+
 });
