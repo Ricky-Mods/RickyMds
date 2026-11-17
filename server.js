@@ -12,13 +12,17 @@ const rateLimit = require("express-rate-limit");
 const path = require("path");
 const fs = require("fs");
 const crypto = require("crypto");
+const githubStorage = require("./github-storage");
 
 const app = express();
 
+// TRUST RAILWAY REVERSE PROXY
+app.set("trust proxy", 1);
+
 const PORT = Number(process.env.PORT || 3000);
 const ROOT = __dirname;
-const DATA = path.join(ROOT, "data");
-const UPLOADS = path.join(ROOT, "uploads");
+const DATA = path.resolve(process.env.DATA_DIR || path.join(ROOT, "data"));
+const UPLOADS = path.resolve(process.env.UPLOADS_DIR || path.join(ROOT, "uploads"));
 
 
 // CREATE REQUIRED FOLDERS
@@ -102,6 +106,22 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 `);
+
+
+
+// GITHUB RELEASE STORAGE DATABASE MIGRATION
+
+const appColumns = new Set(
+    db.prepare("PRAGMA table_info(apps)").all().map(column => column.name)
+);
+
+if (!appColumns.has("github_asset_id")) {
+    db.exec("ALTER TABLE apps ADD COLUMN github_asset_id INTEGER");
+}
+
+if (!appColumns.has("github_download_url")) {
+    db.exec("ALTER TABLE apps ADD COLUMN github_download_url TEXT");
+}
 
 
 // INITIAL ADMIN PASSWORD
@@ -502,64 +522,55 @@ app.get("/api/apps/:slug", (req, res) => {
 });
 
 
+
 // DOWNLOAD APPLICATION
 
 app.get("/api/download/:id", (req, res) => {
+    const id = Number(req.params.id);
 
-    const row = db.prepare(`
-
-        SELECT * FROM apps
-
-        WHERE id=?
-
-        AND status='published'
-
-    `).get(
-        Number(req.params.id)
-    );
-
-
-    if (!row) {
-
-        return res.status(404).send(
-            "Download not found."
-        );
-
+    if (!Number.isSafeInteger(id) || id < 1) {
+        return res.status(400).send("Invalid application ID.");
     }
 
+    const row = db.prepare(`
+        SELECT * FROM apps
+        WHERE id=? AND status='published'
+    `).get(id);
 
+    if (!row) {
+        return res.status(404).send("Download not found.");
+    }
+
+    // GitHub Release downloads
+    if (
+        row.github_download_url &&
+        row.github_download_url.startsWith("https://github.com/")
+    ) {
+        db.prepare(`
+            UPDATE apps SET downloads = downloads + 1 WHERE id=?
+        `).run(row.id);
+
+        return res.redirect(302, row.github_download_url);
+    }
+
+    // Legacy applications stored locally
     const file = path.join(
         UPLOADS,
         "apps",
         path.basename(row.file_name)
     );
 
-
     if (!fs.existsSync(file)) {
-
         return res.status(404).send(
             "The file is currently unavailable."
         );
-
     }
 
-
     db.prepare(`
-
-        UPDATE apps
-
-        SET downloads = downloads + 1
-
-        WHERE id=?
-
+        UPDATE apps SET downloads = downloads + 1 WHERE id=?
     `).run(row.id);
 
-
-    res.download(
-        file,
-        path.basename(row.file_name)
-    );
-
+    return res.download(file, path.basename(row.file_name));
 });
 
 
@@ -701,6 +712,7 @@ app.get("/api/admin/apps", isAdmin, (req, res) => {
 });
 
 
+
 // UPLOAD NEW APPLICATION
 
 app.post(
@@ -710,144 +722,104 @@ app.post(
         { name: "apk", maxCount: 1 },
         { name: "cover", maxCount: 1 }
     ]),
-    (req, res) => {
-
-        const title = clean(
-            req.body.title,
-            120
-        );
-
-        const description = clean(
-            req.body.description,
-            12000
-        );
-
-
+    async (req, res) => {
+        const title = clean(req.body.title, 120);
+        const description = clean(req.body.description, 12000);
         const apk = req.files?.apk?.[0];
-
+        const coverFile = req.files?.cover?.[0];
 
         if (!title || !description || !apk) {
-
-            if (apk) {
-
-                fs.unlinkSync(apk.path);
-
+            if (apk) await fs.promises.unlink(apk.path).catch(() => {});
+            if (coverFile) {
+                await fs.promises.unlink(coverFile.path).catch(() => {});
             }
 
             return res.status(400).json({
-
                 error: "Title, description and an app file are required."
-
             });
-
         }
 
+        let uploadedAsset = null;
 
-        const slug =
-            slugify(title)
-            + "-"
-            + crypto.randomBytes(2).toString("hex");
+        try {
+            uploadedAsset = await githubStorage.uploadAsset(
+                apk.path,
+                apk.filename
+            );
 
+            if (!uploadedAsset?.id || !uploadedAsset?.browser_download_url) {
+                throw new Error("GitHub did not return a valid release asset.");
+            }
 
-        const cover =
-            req.files?.cover?.[0]?.filename || "";
-
-
-        const info = {
-
-            title,
-
-            slug,
-
-            category: clean(
-                req.body.category,
-                60
-            ) || "Apps",
-
-            version: clean(
-                req.body.version,
-                40
-            ),
-
-            size: clean(
-                req.body.size,
-                40
-            ),
-
-            description,
-
-            features: clean(
-                req.body.features,
-                4000
-            ),
-
-            package_name: clean(
-                req.body.packageName,
-                160
-            ),
-
-            file_name: apk.filename,
-
-            cover_name: cover,
-
-            featured:
-                req.body.featured === "true" ? 1 : 0,
-
-            status:
-                req.body.status === "draft"
-                    ? "draft"
-                    : "published"
-
-        };
-
-
-        const result = db.prepare(`
-
-            INSERT INTO apps(
-
+            const info = {
                 title,
-                slug,
-                category,
-                version,
-                size,
+                slug: slugify(title) + "-" +
+                    crypto.randomBytes(2).toString("hex"),
+
+                category: clean(req.body.category, 60) || "Apps",
+                version: clean(req.body.version, 40),
+                size: clean(req.body.size, 40),
                 description,
-                features,
-                package_name,
-                file_name,
-                cover_name,
-                featured,
-                status
+                features: clean(req.body.features, 4000),
+                package_name: clean(req.body.packageName, 160),
 
-            )
+                file_name: uploadedAsset.name || apk.filename,
+                github_asset_id: uploadedAsset.id,
+                github_download_url: uploadedAsset.browser_download_url,
 
-            VALUES(
+                cover_name: coverFile?.filename || "",
+                featured: req.body.featured === "true" ? 1 : 0,
+                status: req.body.status === "draft" ? "draft" : "published"
+            };
 
-                @title,
-                @slug,
-                @category,
-                @version,
-                @size,
-                @description,
-                @features,
-                @package_name,
-                @file_name,
-                @cover_name,
-                @featured,
-                @status
+            const result = db.prepare(`
+                INSERT INTO apps (
+                    title, slug, category, version, size,
+                    description, features, package_name,
+                    file_name, cover_name, featured, status,
+                    github_asset_id, github_download_url
+                )
+                VALUES (
+                    @title, @slug, @category, @version, @size,
+                    @description, @features, @package_name,
+                    @file_name, @cover_name, @featured, @status,
+                    @github_asset_id, @github_download_url
+                )
+            `).run(info);
 
-            )
+            await fs.promises.unlink(apk.path).catch(() => {});
 
-        `).run(info);
+            return res.status(201).json({
+                id: result.lastInsertRowid
+            });
 
+        } catch (error) {
+            console.error("Application upload failed:", error.message);
 
-        res.status(201).json({
+            if (uploadedAsset?.id) {
+                try {
+                    await githubStorage.deleteAsset(uploadedAsset.id);
+                } catch (cleanupError) {
+                    console.error(
+                        "GitHub asset cleanup failed:",
+                        cleanupError.message
+                    );
+                }
+            }
 
-            id: result.lastInsertRowid
+            await fs.promises.unlink(apk.path).catch(() => {});
 
-        });
+            if (coverFile) {
+                await fs.promises.unlink(coverFile.path).catch(() => {});
+            }
 
+            return res.status(502).json({
+                error: "The application could not be saved. Check GitHub storage configuration and try again."
+            });
+        }
     }
 );
+
 
 
 // EDIT EXISTING APPLICATION
@@ -859,138 +831,123 @@ app.put(
         { name: "apk", maxCount: 1 },
         { name: "cover", maxCount: 1 }
     ]),
-    (req, res) => {
-
-        const old = db.prepare(`
-
-            SELECT * FROM apps
-
-            WHERE id=?
-
-        `).get(
-            Number(req.params.id)
-        );
-
-
-        if (!old) {
-
-            return res.status(404).json({
-
-                error: "App not found."
-
-            });
-
-        }
-
-
+    async (req, res) => {
+        const id = Number(req.params.id);
         const apk = req.files?.apk?.[0];
-
         const cover = req.files?.cover?.[0];
 
+        const old = db.prepare(`
+            SELECT * FROM apps WHERE id=?
+        `).get(id);
 
-        const data = {
+        if (!old) {
+            if (apk) await fs.promises.unlink(apk.path).catch(() => {});
+            if (cover) await fs.promises.unlink(cover.path).catch(() => {});
 
-            id: old.id,
-
-            title: clean(
-                req.body.title,
-                120
-            ) || old.title,
-
-            category: clean(
-                req.body.category,
-                60
-            ) || old.category,
-
-            version: clean(
-                req.body.version,
-                40
-            ),
-
-            size: clean(
-                req.body.size,
-                40
-            ),
-
-            description: clean(
-                req.body.description,
-                12000
-            ) || old.description,
-
-            features: clean(
-                req.body.features,
-                4000
-            ),
-
-            package_name: clean(
-                req.body.packageName,
-                160
-            ),
-
-            file_name: apk?.filename || old.file_name,
-
-            cover_name: cover?.filename || old.cover_name,
-
-            featured:
-                req.body.featured === "true" ? 1 : 0,
-
-            status:
-                req.body.status === "draft"
-                    ? "draft"
-                    : "published"
-
-        };
-
-
-        db.prepare(`
-
-            UPDATE apps SET
-
-                title=@title,
-                category=@category,
-                version=@version,
-                size=@size,
-                description=@description,
-                features=@features,
-                package_name=@package_name,
-                file_name=@file_name,
-                cover_name=@cover_name,
-                featured=@featured,
-                status=@status
-
-            WHERE id=@id
-
-        `).run(data);
-
-
-        if (apk) {
-
-            fs.unlink(
-                path.join(UPLOADS, "apps", old.file_name),
-                () => {}
-            );
-
+            return res.status(404).json({ error: "App not found." });
         }
 
+        let newAsset = null;
 
-        if (cover && old.cover_name) {
+        try {
+            if (apk) {
+                newAsset = await githubStorage.uploadAsset(
+                    apk.path,
+                    apk.filename
+                );
 
-            fs.unlink(
-                path.join(UPLOADS, "covers", old.cover_name),
-                () => {}
-            );
+                if (!newAsset?.id || !newAsset?.browser_download_url) {
+                    throw new Error("GitHub did not return a valid release asset.");
+                }
+            }
 
+            const data = {
+                id: old.id,
+
+                title: clean(req.body.title, 120) || old.title,
+                category: clean(req.body.category, 60) || old.category,
+                version: clean(req.body.version, 40),
+                size: clean(req.body.size, 40),
+                description: clean(req.body.description, 12000) || old.description,
+                features: clean(req.body.features, 4000),
+                package_name: clean(req.body.packageName, 160),
+
+                file_name: newAsset?.name || old.file_name,
+                github_asset_id: newAsset?.id || old.github_asset_id,
+                github_download_url:
+                    newAsset?.browser_download_url || old.github_download_url,
+
+                cover_name: cover?.filename || old.cover_name,
+                featured: req.body.featured === "true" ? 1 : 0,
+                status: req.body.status === "draft" ? "draft" : "published"
+            };
+
+            db.prepare(`
+                UPDATE apps SET
+                    title=@title,
+                    category=@category,
+                    version=@version,
+                    size=@size,
+                    description=@description,
+                    features=@features,
+                    package_name=@package_name,
+                    file_name=@file_name,
+                    cover_name=@cover_name,
+                    featured=@featured,
+                    status=@status,
+                    github_asset_id=@github_asset_id,
+                    github_download_url=@github_download_url
+                WHERE id=@id
+            `).run(data);
+
+            if (apk) {
+                await fs.promises.unlink(apk.path).catch(() => {});
+
+                if (old.github_asset_id) {
+                    try {
+                        await githubStorage.deleteAsset(old.github_asset_id);
+                    } catch (error) {
+                        console.error("Old GitHub asset cleanup failed:", error.message);
+                    }
+                } else if (old.file_name) {
+                    await fs.promises.unlink(
+                        path.join(UPLOADS, "apps", path.basename(old.file_name))
+                    ).catch(() => {});
+                }
+            }
+
+            if (cover && old.cover_name) {
+                await fs.promises.unlink(
+                    path.join(UPLOADS, "covers", path.basename(old.cover_name))
+                ).catch(() => {});
+            }
+
+            return res.json({ ok: true });
+
+        } catch (error) {
+            console.error("Application update failed:", error.message);
+
+            if (newAsset?.id) {
+                try {
+                    await githubStorage.deleteAsset(newAsset.id);
+                } catch (cleanupError) {
+                    console.error(
+                        "New GitHub asset cleanup failed:",
+                        cleanupError.message
+                    );
+                }
+            }
+
+            if (apk) await fs.promises.unlink(apk.path).catch(() => {});
+            if (cover) await fs.promises.unlink(cover.path).catch(() => {});
+
+            return res.status(502).json({
+                error: "The application could not be updated. Check GitHub storage configuration and try again."
+            });
         }
-
-
-        res.json({
-
-            ok: true
-
-        });
-
     }
 );
+
 
 
 // DELETE APPLICATION
@@ -998,74 +955,47 @@ app.put(
 app.delete(
     "/api/admin/apps/:id",
     isAdmin,
-    (req, res) => {
+    async (req, res) => {
+        const id = Number(req.params.id);
 
         const row = db.prepare(`
-
-            SELECT * FROM apps
-
-            WHERE id=?
-
-        `).get(
-            Number(req.params.id)
-        );
-
+            SELECT * FROM apps WHERE id=?
+        `).get(id);
 
         if (!row) {
+            return res.status(404).json({ error: "App not found." });
+        }
 
-            return res.status(404).json({
-
-                error: "App not found."
-
+        try {
+            db.prepare(`
+                DELETE FROM apps WHERE id=?
+            `).run(row.id);
+        } catch (error) {
+            console.error("Application database deletion failed:", error.message);
+            return res.status(500).json({
+                error: "The application could not be deleted."
             });
-
         }
 
-
-        db.prepare(`
-
-            DELETE FROM apps
-
-            WHERE id=?
-
-        `).run(row.id);
-
-
-        const files = [
-
-            [
-                path.join(UPLOADS, "apps"),
-                row.file_name
-            ],
-
-            [
-                path.join(UPLOADS, "covers"),
-                row.cover_name
-            ]
-
-        ];
-
-
-        for (const [dir, name] of files) {
-
-            if (name) {
-
-                fs.unlink(
-                    path.join(dir, path.basename(name)),
-                    () => {}
-                );
-
+        if (row.github_asset_id) {
+            try {
+                await githubStorage.deleteAsset(row.github_asset_id);
+            } catch (error) {
+                console.error("GitHub asset deletion failed:", error.message);
             }
-
+        } else if (row.file_name) {
+            await fs.promises.unlink(
+                path.join(UPLOADS, "apps", path.basename(row.file_name))
+            ).catch(() => {});
         }
 
+        if (row.cover_name) {
+            await fs.promises.unlink(
+                path.join(UPLOADS, "covers", path.basename(row.cover_name))
+            ).catch(() => {});
+        }
 
-        res.json({
-
-            ok: true
-
-        });
-
+        return res.json({ ok: true });
     }
 );
 

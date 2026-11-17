@@ -7,3 +7,4 @@ uploads/
 public_backup/
 *.log
 .DS_Store
+server.js.backup
